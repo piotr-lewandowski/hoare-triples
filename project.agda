@@ -1,14 +1,15 @@
 module project where
 
 import Relation.Binary.PropositionalEquality as Eq
-open import Data.Nat using (ℕ; zero; suc; _+_; _*_) renaming (_≡ᵇ_ to _==_; _∸_ to _-_; _<ᵇ_ to _<_; _≤ᵇ_ to _≤_)
+open import Data.Nat using (ℕ; zero; suc; _+_; _*_; _≡ᵇ_; _≟_) renaming (_∸_ to _-_; _<ᵇ_ to _<_; _≤ᵇ_ to _≤_)
 open Eq using (_≡_; refl; cong)
-open import Data.Bool.Base using (T)
 open import Relation.Nullary using (Dec; yes; no; ¬_)
 open import Relation.Nullary.Decidable using (⌊_⌋; toWitness; fromWitness)
 open import Data.String using (String)
 open import Data.Bool using (Bool; true; false; if_then_else_)
-open import Data.Product using (Σ; _,_; ∃; Σ-syntax; ∃-syntax)
+open import Data.Product using (Σ; _×_; ∃; Σ-syntax; ∃-syntax) renaming (_,_ to ⟨_,_⟩)
+open import Data.Sum using (_⊎_; inj₁; inj₂)
+open import Data.String.Properties using (_≈?_; _≟_; _<?_) renaming (_==_ to _≡ₛ_)
 
 -- Environment
 data Assignment (A : Set) : Set where
@@ -20,7 +21,7 @@ data MemoryState (A : Set) : Set where
 
 infixr 5 _v_
 
-record ProgramState : Set where
+record ProgramState : Set where   
     field
         variables : MemoryState String
         heap : MemoryState ℕ
@@ -70,32 +71,17 @@ data _contains_ { A } : MemoryState A → Assignment A → Set where
                   -- że nie jest na pierwszej pozycji
     → ( (y := m) v c ) contains (x := n)
 
-
--- to może mogłoby korzystać z porównania w bibliotece standardowej
--- equality on naturals
-sucEq : ∀ {x y : ℕ} → suc x ≡ suc y → x ≡ y
-sucEq refl = refl
-
-inequalityCong : ∀ {x y : ℕ} → ¬ x ≡ y → ¬ (suc x ≡ suc y)
-inequalityCong ¬x≡y x+1≡y+1 = ¬x≡y (sucEq x+1≡y+1)
-
-_=ₙ_ : ∀ ( x y : ℕ ) → Dec ( x ≡ y )
-zero =ₙ zero = yes refl
-zero =ₙ (suc y) = no (λ ())
-(suc x) =ₙ zero = no (λ ())
-(suc x) =ₙ (suc y) with x =ₙ y
-... | yes p = yes (cong suc p)
-... | no ¬p = no (inequalityCong ¬p)
-
 retrieve : ℕ → MemoryState ℕ → ℕ
 retrieve _ empty = 0
-retrieve x (y := w v c) with x =ₙ y
-... | yes _ = w
-... | no _ = retrieve x c
+retrieve x (y := w v c) with x ≡ᵇ y
+... | true = w
+... | false = retrieve x c
 
 retrieveString : String → MemoryState String → ℕ
 retrieveString _ empty = 0
-retrieveString x (y := w v c) = {!   !}
+retrieveString x (y := w v c) with x ≡ₛ y 
+... | true = w 
+... | false = retrieveString x c 
 
 evalExpr : ProgramState → Expr → ℕ
 evalExpr p (Num n) = n
@@ -106,7 +92,7 @@ evalExpr p (Mul e1 e2) = evalExpr p e1 * evalExpr p e2
 evalExpr p (Deref e) = retrieve (evalExpr p e) (heap p)
 
 evalBoolExpr : ProgramState → BoolExpr → Bool
-evalBoolExpr p (Eq e1 e2) = evalExpr p e1 == evalExpr p e2
+evalBoolExpr p (Eq e1 e2) = evalExpr p e1 ≡ᵇ evalExpr p e2
 evalBoolExpr p (Lt e1 e2) = evalExpr p e1 < evalExpr p e2
 
 _withH_ : ProgramState → Assignment ℕ → ProgramState
@@ -132,16 +118,36 @@ data BigStep : ProgramState → Command → ProgramState → Set₁ where
     sWhileFalse : ∀ { p : ProgramState } → ∀ { x : Assertion } → { b : BoolExpr } → { c : Command }
         → evalBoolExpr p b ≡ false → BigStep p (While x b c) p
     sAssert : ∀ { p : ProgramState } → ∀ { x }
-        → x p
-        → BigStep p (Assert (assertion x)) p
+        → x p → BigStep p (Assert (assertion x)) p
 
 data HoareTriple : Assertion → Command → Assertion → Set₁ where
     hSkip : ∀ { x : Assertion } → HoareTriple x Skip x
-    --   hoare_triple P (Assign x e) (fun h v => exists v', P h v' /\ v = v' $+ (x, eval e h v'))
-    -- hAssign : ∀ { P } → { e : Expr } → { x : String }
-    --     → HoareTriple (assertion P) (Assign x e) (assertion (λ p → ∃ v' (P (record p { variables = v' } ) ∧ v' ≡ variables (p withV (x := e) ))))
-    -- hAssignDeref : ∀ { x y } → { e1 e2 : Expr }
-    --     → (∀ { p : ProgramState } → x p → y (p withH (evalExpr p e1 := evalExpr p e2))) → HoareTriple (assertion x) (AssignDeref e1 e2) (assertion y)
+    hAssign : ∀ { x } 
+        → { e : Expr } 
+        → { s : String } 
+        → HoareTriple (assertion x) (Assign s e) (assertion (λ p → (∃[ v' ] ((x (record p { variables = v' })) 
+        × (variables p ≡ s := (evalExpr (record p { variables = v' }) e) v v')))))
+    hAssignDeref : ∀ { x } 
+        → { e1 e2 : Expr }
+        → HoareTriple (assertion x) (AssignDeref e1 e2) (assertion (λ p → ∃[ h' ] (x (record p { heap = h' })) 
+        × (heap p ≡ (evalExpr (record p { heap = h' }) e1) := (evalExpr (record p { heap = h' }) e2) v h')))
+    hSeq : ∀ { x y z } 
+        → { c1 c2 : Command } 
+        → HoareTriple (assertion x) c1 (assertion y)  
+        → HoareTriple (assertion y) c2 (assertion z)  
+        → HoareTriple (assertion x) (Seq c1 c2) (assertion z)  
+    hIf : ∀ { x y z } 
+        → { b : BoolExpr } 
+        → { c1 c2 : Command } 
+        → HoareTriple (assertion (λ p → (x p) × (evalBoolExpr p b ≡ true))) c1 (assertion y) 
+        → HoareTriple (assertion (λ p → (x p) × (evalBoolExpr p b ≡ false))) c2 (assertion z) 
+        → HoareTriple (assertion x) (If b c1 c2) (assertion (λ p → (y p) ⊎ (z p)))  
+    hWhile : ∀ { x y } 
+        → { b : BoolExpr } 
+        → { c : Command } 
+        → (∀ (p : ProgramState) → y p → x p) 
+        → HoareTriple (assertion (λ p → (x p) × (evalBoolExpr p b ≡ true))) c (assertion x) 
+        → HoareTriple (assertion y) (While (assertion x) b c) (assertion (λ p → (x p) × (evalBoolExpr p b ≡ false)))
     hAssert : ∀ { x y } → { c : Command }
         → (∀ { p : ProgramState } → x p → y p) 
         → HoareTriple (assertion x) (Assert (assertion y)) (assertion x)
@@ -151,10 +157,29 @@ data HoareTriple : Assertion → Command → Assertion → Set₁ where
         → (∀ { p : ProgramState } → y1 p → y2 p ) 
         → HoareTriple (assertion x2) c (assertion y2)
 
-soundness : ∀ { P c Q } 
-    → HoareTriple (assertion P) c (assertion Q) 
+-- lemat 14.1 z książki "Formal Reasoning About Programs" 
+lemma : ∀ { x }
+    → ∀ { b : BoolExpr } 
+    → ∀ { c : Command }
+    → (∀ { p p' : ProgramState } → BigStep p c p' → x p → evalBoolExpr p b ≡ true → x p') 
+    → (∀ { p p' : ProgramState } → BigStep p (While (assertion x) b c) p' → x p → (x p') × (evalBoolExpr p' b ≡ false))
+lemma assumption (sWhileFalse evalBFalse) xp = ⟨ xp , evalBFalse ⟩ 
+lemma assumption (sWhileTrue evalBTrue BS1 BS2) xp = lemma assumption BS2 (assumption BS1 xp evalBTrue)
+
+-- twierdzenie 14.2
+soundness : ∀ { x y }
+    → ∀ { c } 
     → ∀ { p p' } 
+    → HoareTriple (assertion x) c (assertion y) 
     → BigStep p c p' 
-    → P p 
-    → Q p'
-soundness = {!!}
+    → x p 
+    → y p' 
+soundness hSkip sSkip xp = xp 
+soundness (hAssign { x } { e } { s }) (sAssign { p } { s } { e }) xp = {!   !}
+soundness (hAssignDeref { x } { s } { e }) (sAssignDeref { p } { s } { e }) xp = {!   !}
+soundness (hSeq HT1 HT2) (sSeq BS1 BS2) xp = soundness HT2 BS2 (soundness HT1 BS1 xp) 
+soundness {x1} (hIf HT1 HT2) (sIfTrue x BS) xp = inj₁ (soundness HT1 BS ⟨ xp , x ⟩)
+soundness {x1} (hIf HT1 HT2) (sIfFalse x BS) xp = inj₂ (soundness HT2 BS ⟨ xp , x ⟩)
+soundness { _ } { _ } { _ } { p } { _ } (hWhile x HT) BS xp = lemma (λ BS' xp' eq → soundness HT BS' ⟨ xp' , eq ⟩) BS (x p xp) 
+soundness (hAssert x1) (sAssert x) xp = xp
+soundness (hConsequence HT x1 x2) BS xp = x2 (soundness HT BS (x1 xp))  
