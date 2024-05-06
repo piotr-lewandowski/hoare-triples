@@ -1,15 +1,14 @@
 module project where
 
 import Relation.Binary.PropositionalEquality as Eq
-open import Data.Nat using (ℕ; zero; suc; _+_; _*_; _≡ᵇ_; _≟_) renaming (_∸_ to _-_; _<ᵇ_ to _<_; _≤ᵇ_ to _≤_)
-open Eq using (_≡_; refl; cong)
-open import Relation.Nullary using (Dec; yes; no; ¬_)
-open import Relation.Nullary.Decidable using (⌊_⌋; toWitness; fromWitness)
+open import Data.Nat using (ℕ; _+_; _*_) renaming (_∸_ to _-_; _<ᵇ_ to _<_; _≡ᵇ_ to _≡ₙ_)
+open Eq using (_≡_; refl)
+open import Relation.Nullary using (¬_)
 open import Data.String using (String)
 open import Data.Bool using (Bool; true; false; if_then_else_)
 open import Data.Product using (Σ; _×_; ∃; Σ-syntax; ∃-syntax) renaming (_,_ to ⟨_,_⟩)
 open import Data.Sum using (_⊎_; inj₁; inj₂)
-open import Data.String.Properties using (_≈?_; _≟_; _<?_) renaming (_==_ to _≡ₛ_)
+open import Data.String.Properties using () renaming (_==_ to _≡ₛ_)
 
 -- Environment
 data Assignment (A : Set) : Set where
@@ -73,15 +72,15 @@ data _contains_ { A } : MemoryState A → Assignment A → Set where
 
 retrieve : ℕ → MemoryState ℕ → ℕ
 retrieve _ empty = 0
-retrieve x (y := w v c) with x ≡ᵇ y
-... | true = w
-... | false = retrieve x c
+retrieve x (y := w v c) = if x ≡ₙ y 
+  then w 
+  else retrieve x c
 
 retrieveString : String → MemoryState String → ℕ
 retrieveString _ empty = 0
-retrieveString x (y := w v c) with x ≡ₛ y 
-... | true = w 
-... | false = retrieveString x c 
+retrieveString x (y := w v c) = if x ≡ₛ y 
+  then w 
+  else retrieveString x c 
 
 evalExpr : ProgramState → Expr → ℕ
 evalExpr p (Num n) = n
@@ -92,7 +91,7 @@ evalExpr p (Mul e1 e2) = evalExpr p e1 * evalExpr p e2
 evalExpr p (Deref e) = retrieve (evalExpr p e) (heap p)
 
 evalBoolExpr : ProgramState → BoolExpr → Bool
-evalBoolExpr p (Eq e1 e2) = evalExpr p e1 ≡ᵇ evalExpr p e2
+evalBoolExpr p (Eq e1 e2) = evalExpr p e1 ≡ₙ evalExpr p e2
 evalBoolExpr p (Lt e1 e2) = evalExpr p e1 < evalExpr p e2
 
 _withH_ : ProgramState → Assignment ℕ → ProgramState
