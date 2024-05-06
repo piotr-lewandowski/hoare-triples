@@ -174,11 +174,12 @@ soundness : ∀ { x y }
     → x p 
     → y p' 
 soundness hSkip sSkip xp = xp 
-soundness {p = record { variables = variables ; heap = heap }} (hAssign {x} {e} {s}) (sAssign {.(record { variables = variables ; heap = heap })} {s} {e}) xp = ⟨ variables , ⟨ xp , refl ⟩  ⟩
-soundness {p = record { variables = variables ; heap = heap }} (hAssignDeref {x} {s} {e}) (sAssignDeref {.(record { variables = variables ; heap = heap })} {s} {e}) xp = ⟨ heap , ⟨ xp , refl ⟩ ⟩
+soundness {p = p @ record { variables = variables ; heap = heap }} (hAssign {x} {e} {s}) (sAssign {.p} {s} {e}) xp = ⟨ variables , ⟨ xp , refl ⟩  ⟩
+soundness {p = p @ record { variables = variables ; heap = heap }} (hAssignDeref {x} {s} {e}) (sAssignDeref {.p} {s} {e}) xp = ⟨ heap , ⟨ xp , refl ⟩ ⟩
 soundness (hSeq HT1 HT2) (sSeq BS1 BS2) xp = soundness HT2 BS2 (soundness HT1 BS1 xp) 
-soundness {x1} (hIf HT1 HT2) (sIfTrue x BS) xp = inj₁ (soundness HT1 BS ⟨ xp , x ⟩)
-soundness {x1} (hIf HT1 HT2) (sIfFalse x BS) xp = inj₂ (soundness HT2 BS ⟨ xp , x ⟩)
-soundness { _ } { _ } { _ } { p } { _ } (hWhile x HT) BS xp = lemma (λ BS' xp' eq → soundness HT BS' ⟨ xp' , eq ⟩) BS (x p xp) 
+soundness (hIf HT1 HT2) (sIfTrue x BS) xp = inj₁ (soundness HT1 BS ⟨ xp , x ⟩)
+soundness (hIf HT1 HT2) (sIfFalse x BS) xp = inj₂ (soundness HT2 BS ⟨ xp , x ⟩)
+soundness {p = p} (hWhile x HT) BS xp = lemma (λ BS' xp' eq → soundness HT BS' ⟨ xp' , eq ⟩) BS (x p xp) 
 soundness (hAssert x1) (sAssert x) xp = xp
 soundness (hConsequence HT x1 x2) BS xp = x2 (soundness HT BS (x1 xp))  
+  
