@@ -1,16 +1,19 @@
-module project where
+module HoareTriples where
 
-import Relation.Binary.PropositionalEquality as Eq
+-- Basic data types used in the language definition and semantics
 open import Data.Nat using (ℕ; _+_; _*_) renaming (_∸_ to _-_; _<ᵇ_ to _<_; _≡ᵇ_ to _≡ₙ_)
-open Eq using (_≡_; refl)
-open import Relation.Nullary using (¬_)
-open import Data.String using (String)
 open import Data.Bool using (Bool; true; false; if_then_else_)
-open import Data.Product using (Σ; _×_; ∃; Σ-syntax; ∃-syntax) renaming (_,_ to ⟨_,_⟩)
-open import Data.Sum using (_⊎_; inj₁; inj₂)
+open import Data.String using (String)
 open import Data.String.Properties using () renaming (_==_ to _≡ₛ_)
 
--- Environment
+-- Logical operators used mainly in the Hoare triples definition
+import Relation.Binary.PropositionalEquality as Eq
+open Eq using (_≡_; refl)
+open import Data.Product using (Σ; _×_; ∃; Σ-syntax; ∃-syntax) renaming (_,_ to ⟨_,_⟩)
+open import Data.Sum using (_⊎_; inj₁; inj₂)
+
+-- Definition of program state, memory is represented as a list of pairs,
+-- either a variable name and it's value or a memory address and it's value
 data Assignment (A : Set) : Set where
   _:=_ : A → ℕ → Assignment A
 
@@ -26,7 +29,7 @@ record ProgramState : Set where
         heap : MemoryState ℕ
 open ProgramState public
 
--- Syntax
+-- Abstract definition of language syntax
 data Expr : Set where
   Num : ℕ → Expr
   Var : String → Expr
@@ -42,12 +45,6 @@ data BoolExpr : Set where
 data Assertion : Set₁ where
     assertion : (p : ProgramState → Set) → Assertion
 
-data Isempty : ProgramState → Set where
-  isempty : Isempty record { variables = empty; heap = empty }
-
-test : Assertion
-test = assertion λ p → Isempty p
-
 data Command : Set₁ where
   Skip : Command
   Assign : String → Expr → Command
@@ -57,24 +54,13 @@ data Command : Set₁ where
   While : Assertion → BoolExpr → Command → Command
   Assert : Assertion → Command
 
--- Semantics
-initialState : ProgramState
-initialState = record { variables = empty; heap = empty }
-
-data _contains_ { A } : MemoryState A → Assignment A → Set where
-  top : ∀ { a : Assignment A } → ∀ { c : MemoryState A }
-    →  (a v c) contains a
-  tail : ∀ { x y } → ∀ { m n } → ∀ { c : MemoryState A }
-    → ( c contains ( x := n ) )
-    → ¬ ( x ≡ y ) -- dodatkowo zakładamy, że jeśli sprawdzamy, czy zmienna jest dalej w ciągu, to upewniamy się,
-                  -- że nie jest na pierwszej pozycji
-    → ( (y := m) v c ) contains (x := n)
-
-retrieve : ℕ → MemoryState ℕ → ℕ
-retrieve _ empty = 0
-retrieve x (y := w v c) = if x ≡ₙ y 
+-- Helper functions for handling memory, note that if there is no 
+-- explicitly set value we simply return 0
+retrieveNat : ℕ → MemoryState ℕ → ℕ
+retrieveNat _ empty = 0
+retrieveNat x (y := w v c) = if x ≡ₙ y 
   then w 
-  else retrieve x c
+  else retrieveNat x c
 
 retrieveString : String → MemoryState String → ℕ
 retrieveString _ empty = 0
@@ -82,17 +68,8 @@ retrieveString x (y := w v c) = if x ≡ₛ y
   then w 
   else retrieveString x c 
 
-evalExpr : ProgramState → Expr → ℕ
-evalExpr p (Num n) = n
-evalExpr p (Var x) = retrieveString x (variables p)
-evalExpr p (Add e1 e2) = evalExpr p e1 + evalExpr p e2
-evalExpr p (Sub e1 e2) = evalExpr p e1 - evalExpr p e2
-evalExpr p (Mul e1 e2) = evalExpr p e1 * evalExpr p e2
-evalExpr p (Deref e) = retrieve (evalExpr p e) (heap p)
-
-evalBoolExpr : ProgramState → BoolExpr → Bool
-evalBoolExpr p (Eq e1 e2) = evalExpr p e1 ≡ₙ evalExpr p e2
-evalBoolExpr p (Lt e1 e2) = evalExpr p e1 < evalExpr p e2
+initialState : ProgramState
+initialState = record { variables = empty; heap = empty }
 
 _withH_ : ProgramState → Assignment ℕ → ProgramState
 p withH a = record p { heap = a v heap p }
@@ -100,6 +77,20 @@ p withH a = record p { heap = a v heap p }
 _withV_ : ProgramState → Assignment String → ProgramState
 p withV a = record p { variables = a v variables p }
 
+-- Semantics definition for expressions
+evalExpr : ProgramState → Expr → ℕ
+evalExpr p (Num n) = n
+evalExpr p (Var x) = retrieveString x (variables p)
+evalExpr p (Add e1 e2) = evalExpr p e1 + evalExpr p e2
+evalExpr p (Sub e1 e2) = evalExpr p e1 - evalExpr p e2
+evalExpr p (Mul e1 e2) = evalExpr p e1 * evalExpr p e2
+evalExpr p (Deref e) = retrieveNat (evalExpr p e) (heap p)
+
+evalBoolExpr : ProgramState → BoolExpr → Bool
+evalBoolExpr p (Eq e1 e2) = evalExpr p e1 ≡ₙ evalExpr p e2
+evalBoolExpr p (Lt e1 e2) = evalExpr p e1 < evalExpr p e2
+
+-- Semantics definition for the commands, using big-step semantics
 data BigStep : ProgramState → Command → ProgramState → Set₁ where
     sSkip : ∀ { p : ProgramState } → BigStep p Skip p
     sAssign : ∀ { p : ProgramState} → { x : String } → { e : Expr } 
@@ -119,6 +110,7 @@ data BigStep : ProgramState → Command → ProgramState → Set₁ where
     sAssert : ∀ { p : ProgramState } → ∀ { x }
         → x p → BigStep p (Assert (assertion x)) p
 
+-- Definition of Hoare triples for all commands
 data HoareTriple : Assertion → Command → Assertion → Set₁ where
     hSkip : ∀ { x : Assertion } → HoareTriple x Skip x
     hAssign : ∀ { x } 
@@ -156,7 +148,7 @@ data HoareTriple : Assertion → Command → Assertion → Set₁ where
         → (∀ { p : ProgramState } → y1 p → y2 p ) 
         → HoareTriple (assertion x2) c (assertion y2)
 
--- lemat 14.1 z książki "Formal Reasoning About Programs" 
+-- Proof of Lemma 14.1 from "Formal Reasoning About Programs" 
 lemma : ∀ { x }
     → ∀ { b : BoolExpr } 
     → ∀ { c : Command }
@@ -165,7 +157,7 @@ lemma : ∀ { x }
 lemma assumption (sWhileFalse evalBFalse) xp = ⟨ xp , evalBFalse ⟩ 
 lemma assumption (sWhileTrue evalBTrue BS1 BS2) xp = lemma assumption BS2 (assumption BS1 xp evalBTrue)
 
--- twierdzenie 14.2
+-- Proof of Theorem 14.2 from "Formal Reasoning About Programs"
 soundness : ∀ { x y }
     → ∀ { c } 
     → ∀ { p p' } 
