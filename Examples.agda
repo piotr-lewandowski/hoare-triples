@@ -5,6 +5,9 @@ open import HoareTriples
 import Relation.Binary.PropositionalEquality as Eq
 open Eq using (_≡_; refl)
 
+initialState : ProgramState
+initialState = record { variables = empty; heap = empty }
+
 data IsEmpty : ProgramState → Set where
   isempty : IsEmpty record { variables = empty; heap = empty }
 
