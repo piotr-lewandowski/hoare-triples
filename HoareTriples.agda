@@ -68,9 +68,6 @@ retrieveString x (y := w v c) = if x ≡ₛ y
   then w 
   else retrieveString x c 
 
-initialState : ProgramState
-initialState = record { variables = empty; heap = empty }
-
 _withH_ : ProgramState → Assignment ℕ → ProgramState
 p withH a = record p { heap = a v heap p }
 
@@ -111,13 +108,18 @@ data BigStep : ProgramState → Command → ProgramState → Set₁ where
         → x p → BigStep p (Assert (assertion x)) p
 
 -- Definition of Hoare triples for all commands
-data HoareTriple : Assertion → Command → Assertion → Set₁ where
+data HoareTriple : Assertion → Command → Assertion → Set₁ where  
+    -- HoareTriple x c y is just a predicate instance which can be interpreted in the following way: 
+    -- “if we start command c in a state satisfying x then after c finishes a final state satisfies y”.
     hSkip : ∀ { x : Assertion } → HoareTriple x Skip x
     hAssign : ∀ { x } 
         → { e : Expr } 
         → { s : String } 
         → HoareTriple (assertion x) (Assign s e) (assertion (λ p → (∃[ v' ] ((x (record p { variables = v' })) 
         × (variables p ≡ s := (evalExpr (record p { variables = v' }) e) v v')))))
+        -- A rule for assignment is quite natural: if we assign expression e to variable s in a prestate then we get a final 
+        -- state in which we recall an existence of this prestate. New variable valuations are the old ones with additional 
+        -- valuation s -> [e](h, v'), where h and v' are heap and variable valuations of prestate respectively. 
     hAssignDeref : ∀ { x } 
         → { e1 e2 : Expr }
         → HoareTriple (assertion x) (AssignDeref e1 e2) (assertion (λ p → ∃[ h' ] (x (record p { heap = h' })) 
@@ -133,12 +135,17 @@ data HoareTriple : Assertion → Command → Assertion → Set₁ where
         → HoareTriple (assertion (λ p → (x p) × (evalBoolExpr p b ≡ true))) c1 (assertion y) 
         → HoareTriple (assertion (λ p → (x p) × (evalBoolExpr p b ≡ false))) c2 (assertion z) 
         → HoareTriple (assertion x) (If b c1 c2) (assertion (λ p → (y p) ⊎ (z p)))  
+        -- If we have two subcommands c1 and c2 each of which runs after different outcome of the test expression 
+        -- then we can extend their preconditions. Postcondition of our new conditional statement is just a disjunction
+        -- of subcommands postconditions. 
     hWhile : ∀ { x y } 
         → { b : BoolExpr } 
         → { c : Command } 
         → (∀ (p : ProgramState) → y p → x p) 
         → HoareTriple (assertion (λ p → (x p) × (evalBoolExpr p b ≡ true))) c (assertion x) 
         → HoareTriple (assertion y) (While (assertion x) b c) (assertion (λ p → (x p) × (evalBoolExpr p b ≡ false)))
+        -- Assertion x in a while loop is loop invariant. In other words, this assertion is true every time a loop iteration begins. 
+        -- If the loop finishes then the test must be false. Otherwise, next loop iteration would begin. 
     hAssert : ∀ { x y } → { c : Command }
         → (∀ { p : ProgramState } → x p → y p) 
         → HoareTriple (assertion x) (Assert (assertion y)) (assertion x)
@@ -156,6 +163,7 @@ lemma : ∀ { x }
     → (∀ { p p' : ProgramState } → BigStep p (While (assertion x) b c) p' → x p → (x p') × (evalBoolExpr p' b ≡ false))
 lemma assumption (sWhileFalse evalBFalse) xp = ⟨ xp , evalBFalse ⟩ 
 lemma assumption (sWhileTrue evalBTrue BS1 BS2) xp = lemma assumption BS2 (assumption BS1 xp evalBTrue)
+-- The proof of the lemma above is an easy induction on the derivation of BigStep p (While (assertion x) b c) p'
 
 -- Proof of Theorem 14.2 from "Formal Reasoning About Programs"
 soundness : ∀ { x y }
@@ -166,12 +174,15 @@ soundness : ∀ { x y }
     → x p 
     → y p' 
 soundness hSkip sSkip xp = xp 
-soundness {p = p @ record { variables = variables ; heap = heap }} (hAssign {x} {e} {s}) (sAssign {.p} {s} {e}) xp = ⟨ variables , ⟨ xp , refl ⟩  ⟩
+soundness {p = p @ record { variables = variables ; heap = heap }} (hAssign {x} {e} {s}) (sAssign {.p} {s} {e}) xp = ⟨ variables , ⟨ xp , refl ⟩ ⟩ 
+-- assigning expression to variable doesn't change heap 
 soundness {p = p @ record { variables = variables ; heap = heap }} (hAssignDeref {x} {s} {e}) (sAssignDeref {.p} {s} {e}) xp = ⟨ heap , ⟨ xp , refl ⟩ ⟩
+-- memory-write command doesn't change variable valuations 
 soundness (hSeq HT1 HT2) (sSeq BS1 BS2) xp = soundness HT2 BS2 (soundness HT1 BS1 xp) 
-soundness (hIf HT1 HT2) (sIfTrue x BS) xp = inj₁ (soundness HT1 BS ⟨ xp , x ⟩)
+soundness (hIf HT1 HT2) (sIfTrue x BS) xp = inj₁ (soundness HT1 BS ⟨ xp , x ⟩) 
 soundness (hIf HT1 HT2) (sIfFalse x BS) xp = inj₂ (soundness HT2 BS ⟨ xp , x ⟩)
-soundness {p = p} (hWhile x HT) BS xp = lemma (λ BS' xp' eq → soundness HT BS' ⟨ xp' , eq ⟩) BS (x p xp) 
+soundness {p = p} (hWhile x HT) BS xp = lemma (λ BS' xp' eq → soundness HT BS' ⟨ xp' , eq ⟩) BS (x p xp)
+-- If we match (HoareTriple (assertion x) c (assertion y)) with (hWhile x HT) then command c is a while loop and hence BS was constructed with 
+-- sWhileTrue or sWhileFalse. For this reason we can use BS as an argument in lemma 14.1. 
 soundness (hAssert x1) (sAssert x) xp = xp
 soundness (hConsequence HT x1 x2) BS xp = x2 (soundness HT BS (x1 xp))  
-  
